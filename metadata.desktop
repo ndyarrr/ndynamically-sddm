@@ -1,0 +1,8 @@
+[SddmGreeterTheme]
+Name=ndynamically-sddm
+Description=ndynamically-sddm Theme with random MP4 background video from Wallpapers folder
+Author=ndyarr
+Type=sddm-theme
+MainScript=Main.qml
+ConfigFile=theme.conf
+QtVersion=6

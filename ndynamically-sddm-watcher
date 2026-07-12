@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+# Setup Colors
+C_MAIN='\033[38;2;202;169;224m'
+C_ACCENT='\033[38;2;145;177;240m'
+C_DIM='\033[38;2;129;122;150m'
+C_GREEN='\033[38;2;166;209;137m'
+C_YELLOW='\033[38;2;229;200;144m'
+C_RED='\033[38;2;231;130;132m'
+C_BOLD='\033[1m'
+C_RESET='\033[0m'
+
+THEME_DIR="/usr/share/sddm/themes/ndynamically-sddm"
+
+# Detect wallpaper directory from BackgroundVideo.qml if not provided
+WALLPAPER_DIR="$1"
+if [ -z "$WALLPAPER_DIR" ]; then
+    if [ -f "$THEME_DIR/BackgroundVideo.qml" ]; then
+        WALLPAPER_DIR=$(grep 'folder: ' "$THEME_DIR/BackgroundVideo.qml" | cut -d'"' -f2 | sed 's|^file://||')
+    fi
+fi
+
+if [ -z "$WALLPAPER_DIR" ] || [ ! -d "$WALLPAPER_DIR" ]; then
+    echo -e "${C_RED}Error: Could not detect valid wallpaper directory.${C_RESET}"
+    exit 1
+fi
+
+if ! command -v inotifywait &> /dev/null; then
+    echo -e "${C_RED}Error: inotifywait (from inotify-tools) is not installed!${C_RESET}"
+    echo -e "Please install inotify-tools to use this watcher."
+    exit 1
+fi
+
+echo -e "${C_MAIN}${C_BOLD}╭─ 󰓅 Starting Wallpaper Watcher Daemon...${C_RESET}"
+echo -e "${C_MAIN}${C_BOLD}│${C_RESET}  Watching: ${C_ACCENT}$WALLPAPER_DIR${C_RESET}"
+echo -e "${C_MAIN}${C_BOLD}╰─ ${C_GREEN}Press Ctrl+C to stop.${C_RESET}\n"
+
+# Run sync once at startup to ensure everything is synced
+/usr/local/bin/ndynamically-sddm-sync "$WALLPAPER_DIR"
+
+# Watch the folder for any changes in images or videos
+inotifywait -m -r -e create,delete,modify,move --format '%f' "$WALLPAPER_DIR" | while read -r file; do
+    # Only trigger sync if the changed file matches the video/image patterns
+    if [[ "$file" =~ \.(mp4|gif|png|jpg|jpeg|webp)$ ]]; then
+        echo -e "${C_MAIN}│${C_RESET} File change detected: ${C_YELLOW}$file${C_RESET}. Syncing colors..."
+        /usr/local/bin/ndynamically-sddm-sync "$WALLPAPER_DIR"
+    fi
+done

@@ -1,0 +1,231 @@
+#!/usr/bin/env bash
+
+# Setup Colors
+C_MAIN='\033[38;2;202;169;224m'
+C_ACCENT='\033[38;2;145;177;240m'
+C_DIM='\033[38;2;129;122;150m'
+C_GREEN='\033[38;2;166;209;137m'
+C_YELLOW='\033[38;2;229;200;144m'
+C_RED='\033[38;2;231;130;132m'
+C_BOLD='\033[1m'
+C_RESET='\033[0m'
+
+THEME_DIR="/usr/share/sddm/themes/ndynamically-sddm"
+
+if [ ! -d "$THEME_DIR" ]; then
+    echo -e "${C_RED}Error: ndynamically-sddm theme is not installed in $THEME_DIR${C_RESET}"
+    exit 1
+fi
+
+# Detect wallpaper directory from BackgroundVideo.qml if not provided
+WALLPAPER_DIR="$1"
+
+if [ "$1" = "--set-dir" ] || [ "$1" = "-s" ] || [ "$1" = "-d" ] || [ "$1" = "--dir" ]; then
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "${C_RED}Error: Please run with sudo to change the wallpaper directory:${C_RESET}"
+        echo -e "  ${C_BOLD}sudo ndynamically-sddm-sync --set-dir /path/to/wallpapers${C_RESET}"
+        exit 1
+    fi
+
+    NEW_DIR="$2"
+    if [ -z "$NEW_DIR" ]; then
+        echo -e "${C_RED}Error: Please specify the new wallpaper directory path.${C_RESET}"
+        echo -e "Usage: sudo ndynamically-sddm-sync --set-dir /path/to/wallpapers"
+        exit 1
+    fi
+
+    # Expand tilde ~ to real user's home if run under sudo
+    if [ -n "$SUDO_USER" ]; then
+        REAL_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+        NEW_DIR="${NEW_DIR/#\~/$REAL_HOME}"
+    fi
+
+    # Convert to absolute path if relative
+    if [[ ! "$NEW_DIR" = /* ]]; then
+        NEW_DIR="${PWD}/${NEW_DIR}"
+    fi
+
+    # Remove trailing slash
+    NEW_DIR="${NEW_DIR%/}"
+
+    # Create directory if it doesn't exist
+    if [ ! -d "$NEW_DIR" ]; then
+        echo -e "${C_MAIN}${C_BOLD}│${C_RESET}  Directory does not exist. Creating $NEW_DIR..."
+        mkdir -p "$NEW_DIR"
+        if [ -n "$SUDO_USER" ]; then
+            chown -R "$SUDO_USER":"SUDO_USER" "$NEW_DIR" 2>/dev/null || chown -R "$SUDO_USER" "$NEW_DIR"
+        fi
+    fi
+
+    # Set directory permissions for sddm traversal and reading
+    echo -e "${C_MAIN}${C_BOLD}│${C_RESET}  Setting directory permissions for SDDM traversal..."
+    path_traverse="$NEW_DIR"
+    while [ "$path_traverse" != "/" ] && [ -n "$path_traverse" ]; do
+        if [ -d "$path_traverse" ]; then
+            chmod o+x "$path_traverse"
+        fi
+        path_traverse="$(dirname "$path_traverse")"
+    done
+    chmod -R o+rX "$NEW_DIR"
+
+    # Update BackgroundVideo.qml
+    if [ -f "$THEME_DIR/BackgroundVideo.qml" ]; then
+        echo -e "${C_MAIN}${C_BOLD}│${C_RESET}  Updating wallpaper path in BackgroundVideo.qml..."
+        sed -i "s|folder: \"file://.*\"|folder: \"file://$NEW_DIR\"|g" "$THEME_DIR/BackgroundVideo.qml"
+    else
+        echo -e "${C_RED}Error: Theme files not found in $THEME_DIR. Is it installed?${C_RESET}"
+        exit 1
+    fi
+
+    # Update systemd path unit if systemd is available
+    SYSTEMD_DIR="/etc/systemd/system"
+    if [ -d "$SYSTEMD_DIR" ] && command -v systemctl &>/dev/null; then
+        echo -e "${C_MAIN}${C_BOLD}│${C_RESET}  Updating systemd path unit ndynamically-sddm-sync.path..."
+        cat > "$SYSTEMD_DIR/ndynamically-sddm-sync.path" << PATHEOF
+[Unit]
+Description=Watch wallpaper directory for ndynamically-sddm accent sync
+
+[Path]
+PathChanged=$NEW_DIR
+MakeDirectory=yes
+
+[Install]
+WantedBy=multi-user.target
+PATHEOF
+        systemctl daemon-reload
+        systemctl restart ndynamically-sddm-sync.path 2>/dev/null
+    fi
+
+    echo -e "${C_GREEN}${C_BOLD}✔ Wallpaper directory successfully updated to: $NEW_DIR${C_RESET}"
+    WALLPAPER_DIR="$NEW_DIR"
+else
+    if [ -z "$WALLPAPER_DIR" ]; then
+        if [ -f "$THEME_DIR/BackgroundVideo.qml" ]; then
+            WALLPAPER_DIR=$(grep 'folder: ' "$THEME_DIR/BackgroundVideo.qml" | cut -d'"' -f2 | sed 's|^file://||')
+        fi
+    fi
+fi
+
+if [ -z "$WALLPAPER_DIR" ] || [ ! -d "$WALLPAPER_DIR" ]; then
+    echo -e "${C_RED}Error: Could not detect valid wallpaper directory.${C_RESET}"
+    exit 1
+fi
+
+echo -e "${C_MAIN}${C_BOLD}╭─ 󰓅 Syncing Wallpaper Accent Colors (6-Color Palette)...${C_RESET}"
+echo -e "${C_MAIN}${C_BOLD}│${C_RESET}  Wallpaper Dir: ${C_ACCENT}$WALLPAPER_DIR${C_RESET}"
+
+# Check for ffmpeg
+if ! command -v ffmpeg &> /dev/null; then
+    echo -e "${C_MAIN}${C_BOLD}│${C_RESET}  ${C_RED}Warning: ffmpeg is not installed! Cannot extract video/image colors.${C_RESET}"
+    echo -e "${C_MAIN}${C_BOLD}│${C_RESET}  ${C_RED}Please install ffmpeg (e.g. sudo pacman -S ffmpeg or sudo apt install ffmpeg)${C_RESET}"
+    exit 1
+fi
+
+JS_FILE="$THEME_DIR/colors.js"
+
+# Load existing colors.js if it exists to preserve cached colors
+declare -A existing_colors
+if [ -f "$JS_FILE" ]; then
+    while read -r line; do
+        if [[ "$line" =~ \"(.*)\"\ *:\ *\[(.*)\] ]]; then
+            existing_colors["${BASH_REMATCH[1]}"]="[${BASH_REMATCH[2]}]"
+        fi
+    done < "$JS_FILE"
+fi
+
+# Scan folder and extract colors
+js_entries=""
+first=true
+
+# Find all matching files
+while IFS= read -r -d '' file; do
+    basename=$(basename "$file")
+    color=""
+    
+    # Check if color is already cached, is NOT the fallback list, and has diverse colors
+    cached="${existing_colors[$basename]}"
+    is_diverse=false
+    if [ -n "$cached" ] && [[ "$cached" != *d05870* ]]; then
+        # Check if the 6 colors are actually diverse (not all the same from old extraction)
+        unique_count=$(echo "$cached" | grep -oP '"#[0-9a-fA-F]{6}"' | sort -u | wc -l)
+        if [ "$unique_count" -ge 3 ]; then
+            is_diverse=true
+        fi
+    fi
+
+    if [ "$is_diverse" = true ]; then
+        color="$cached"
+        echo -e "${C_MAIN}${C_BOLD}│${C_RESET}  ${C_DIM}Cached: ${C_RESET}$basename -> ${C_ACCENT}$color${C_RESET}"
+    else
+        echo -e -n "${C_MAIN}${C_BOLD}│${C_RESET}  Extracting palette: $basename ... "
+        raw_hex=""
+        tmppal=$(mktemp /tmp/sddm_pal_XXXXXX.png)
+
+        # Method 1: palettegen (k-means clustering for most DISTINCT colors)
+        # -nostdin: prevent stdin conflicts in loops
+        # -update 1: correct way to write single image output (not -vframes)
+        # thumbnail: pick most representative frame from video
+        if ffmpeg -nostdin -i "$file" -vf "thumbnail,palettegen=max_colors=6:stats_mode=single" -update 1 -y "$tmppal" 2>/dev/null && [ -s "$tmppal" ]; then
+            raw_hex=$(ffmpeg -nostdin -i "$tmppal" -vf "crop=6:1:0:0" -f rawvideo -pix_fmt rgb24 -frames:v 1 -y pipe:1 2>/dev/null | od -An -tx1 -v | tr -d ' \n')
+        fi
+
+        # Method 2: palettegen without thumbnail (for images / short clips)
+        if [ ${#raw_hex} -ne 36 ]; then
+            if ffmpeg -nostdin -i "$file" -vf "palettegen=max_colors=6:stats_mode=single" -update 1 -y "$tmppal" 2>/dev/null && [ -s "$tmppal" ]; then
+                raw_hex=$(ffmpeg -nostdin -i "$tmppal" -vf "crop=6:1:0:0" -f rawvideo -pix_fmt rgb24 -frames:v 1 -y pipe:1 2>/dev/null | od -An -tx1 -v | tr -d ' \n')
+            fi
+        fi
+
+        # Method 3: palettegen with seek 0.5s (skip black intro frames)
+        if [ ${#raw_hex} -ne 36 ]; then
+            if ffmpeg -nostdin -ss 0.5 -i "$file" -vf "palettegen=max_colors=6:stats_mode=single" -update 1 -y "$tmppal" 2>/dev/null && [ -s "$tmppal" ]; then
+                raw_hex=$(ffmpeg -nostdin -i "$tmppal" -vf "crop=6:1:0:0" -f rawvideo -pix_fmt rgb24 -frames:v 1 -y pipe:1 2>/dev/null | od -An -tx1 -v | tr -d ' \n')
+            fi
+        fi
+
+        # Method 4: Fallback to scale=3:2 (6 spatial regions)
+        if [ ${#raw_hex} -ne 36 ]; then
+            raw_hex=$(ffmpeg -nostdin -i "$file" -vf "scale=3:2" -f rawvideo -pix_fmt rgb24 -frames:v 1 -y pipe:1 2>/dev/null | od -An -tx1 -v | tr -d ' \n')
+        fi
+
+        # Method 5: scale=6:1 as last resort
+        if [ ${#raw_hex} -ne 36 ]; then
+            raw_hex=$(ffmpeg -nostdin -i "$file" -vf "scale=6:1" -f rawvideo -pix_fmt rgb24 -frames:v 1 -y pipe:1 2>/dev/null | od -An -tx1 -v | tr -d ' \n')
+        fi
+
+        rm -f "$tmppal"
+
+        if [ ${#raw_hex} -eq 36 ]; then
+            c1="#${raw_hex:0:6}"
+            c2="#${raw_hex:6:6}"
+            c3="#${raw_hex:12:6}"
+            c4="#${raw_hex:18:6}"
+            c5="#${raw_hex:24:6}"
+            c6="#${raw_hex:30:6}"
+            color="[\"$c1\", \"$c2\", \"$c3\", \"$c4\", \"$c5\", \"$c6\"]"
+            echo -e "${C_GREEN}Done ($c1, $c2, $c3, $c4, $c5, $c6)${C_RESET}"
+        else
+            color="[\"#d05870\", \"#d05870\", \"#d05870\", \"#d05870\", \"#d05870\", \"#d05870\"]" # Fallback list
+            echo -e "${C_YELLOW}Failed (Fallback list)${C_RESET}"
+        fi
+    fi
+    
+    if [ "$first" = true ]; then
+        js_entries+="    \"${basename}\": ${color}"
+        first=false
+    else
+        js_entries+=",
+    \"${basename}\": ${color}"
+    fi
+done < <(find "$WALLPAPER_DIR" -type f \( -iname "*.mp4" -o -iname "*.gif" -o -iname "*.png" -o -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.webp" \) -print0)
+
+# Write colors.js as a native QML JavaScript module
+cat > "$JS_FILE" << EOF
+// Auto-generated by ndynamically-sddm-sync. Do not edit manually.
+var colorMap = {
+${js_entries}
+};
+EOF
+chmod 644 "$JS_FILE"
+
+echo -e "${C_MAIN}${C_BOLD}╰─ ${C_GREEN}✔ ${C_RESET}Accent colors palette synchronized! (${JS_FILE})\n"
