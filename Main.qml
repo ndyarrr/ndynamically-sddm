@@ -13,7 +13,7 @@ Rectangle {
         z: -1
     }
     readonly property real s: Screen.height / 768
-    id: root; width: Screen.width; height: Screen.height; color: "#14101a"
+    id: root; width: Screen.width; height: Screen.height; color: '#000000'; opacity: 1
     
     property bool isQuickshell: typeof sddm === "undefined" || sddm.hostName === undefined
     property int sessionIndex: (typeof sessionModel !== "undefined" && sessionModel.lastIndex >= 0) ? sessionModel.lastIndex : 0
@@ -24,6 +24,15 @@ Rectangle {
     readonly property color peachSky: "#f0a060"
     readonly property color sunCream: "#fae8d0"
     readonly property color silhouettes: "#303c44"
+    readonly property color darkBase: "#14101a"
+
+    // Accent-tinted semi-transparent panel background (subtly tinted by accent1)
+    readonly property color panelBg: Qt.rgba(
+        darkBase.r + accent1.r * 0.1,
+        darkBase.g + accent1.g * 0.1,
+        darkBase.b + accent1.b * 0.1,
+        0.8
+    )
 
     // Dynamic Accent Colors (6-Color Palette)
     property color accent1: roseUI
@@ -39,7 +48,7 @@ Rectangle {
         var g = accentColor.g;
         var b = accentColor.b;
         var luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-        return luminance > 0.5 ? "#14101a" : "#fae8d0";
+        return luminance > 0.5 ? root.darkBase : root.sunCream;
     }
 
     // Returns a readable accent color for dark backgrounds (ensuring minimum brightness)
@@ -64,7 +73,7 @@ Rectangle {
         var luminance = 0.299 * r + 0.587 * g + 0.114 * b;
         if (luminance > 0.5) {
             var factor = 0.6;
-            var target = Qt.color("#14101a");
+            var target = root.darkBase;
             return Qt.rgba(r + (target.r - r) * factor, g + (target.g - g) * factor, b + (target.b - b) * factor, 1.0);
         } else {
             return root.readableAccent(accentColor);
@@ -160,6 +169,7 @@ Rectangle {
     }
 
     FontLoader { id: pf; source: "font/PixelifySans-Bold.ttf" }
+    FontLoader { id: clock; source: "font/DIN-Bold.ttf" }
     
     ListView { id: sessionHelper; model: typeof sessionModel !== "undefined" ? sessionModel : null; currentIndex: root.sessionIndex; opacity: 0; width: 100; height: 100; z: -100; delegate: Item { property string sName: model.name || "" } }
     ListView { id: userHelper; model: typeof userModel !== "undefined" ? userModel : null; currentIndex: root.userIndex; opacity: 0; width: 100; height: 100; z: -100; delegate: Item { property string uName: model.realName || model.name || ""; property string uLogin: model.name || ""; property string uIcon: model.icon || "" } }
@@ -171,6 +181,24 @@ Rectangle {
         fadeAnim.start();
         keyboard.numLock = true;
         initialColorTimer.start();
+        // rootFadeIn.start();
+    }
+
+    
+
+    // Auto-redirect: kalau user ngetik huruf/angka di mana pun (misal fokus lagi di tombol),
+// otomatis lempar fokus + karakter itu ke field password
+    Keys.onPressed: (event) => {
+        // Kalau pwd sudah fokus, biarkan TextInput yang handle sendiri (jangan diganggu)
+        if (pwd.activeFocus) return;
+
+        // Cuma tangkap karakter yang "ketik-able" (huruf, angka, simbol printable)
+        if (event.text && event.text.length > 0 && /^[\x20-\x7E]$/.test(event.text)) {
+            pwd.forceActiveFocus();
+            pwd.wasClicked = true;
+            pwd.text += event.text;
+            event.accepted = true;
+        }
     }
 
     Timer {
@@ -185,8 +213,33 @@ Rectangle {
     }
 
     NumberAnimation { id: fadeAnim; target: root; property: "ui"; from: 0; to: 1; duration: 2000; easing.type: Easing.OutSine }
+    NumberAnimation {
+        id: rootFadeIn
+        target: bgLoader
+        property: "opacity"
+        from: 0
+        to: 1
+        duration: 800
+        easing.type: Easing.OutQuad
+    }
 
-    Loader { id: bgLoader; anchors.fill: parent; source: "BackgroundVideo.qml" }
+    Loader {
+        id: bgLoader
+        anchors.fill: parent
+        source: "BackgroundVideo.qml"
+        opacity: 0
+        onLoaded: {
+            if (item) {
+                item.backgroundReady.connect(function() {
+                    rootFadeIn.start()
+                })
+                // Jaga-jaga kalau ternyata sudah ready duluan sebelum sempat connect
+                if (item.backgroundReadyFlag) {
+                    rootFadeIn.start()
+                }
+            }
+        }
+    }
 
     // View Overlays
     Rectangle { anchors.top: parent.top; width: parent.width; height: 160 * s; gradient: Gradient { GradientStop { position: 0.0; color: "#60000000" } GradientStop { position: 1.0; color: "transparent" } } }
@@ -200,15 +253,18 @@ Rectangle {
         spacing: 4 * s; opacity: root.ui
         
         Text {
-            id: clk; text: Qt.formatTime(new Date(), "HH:mm")
-            color: root.dynamicAccentForWallpaper(root.accent1); font.family: pf.name; font.pixelSize: 84 * s; font.letterSpacing: -2 * s
-            Timer { interval: 1000; running: true; repeat: true; onTriggered: clk.text = Qt.formatTime(new Date(), "HH:mm") }
+            id: clk; text: Qt.formatTime(new Date(), "HH.mm")
+            color: root.dynamicAccentForWallpaper(root.accent1); font.family: clock.name; font.pixelSize: 100 * s; font.letterSpacing: -2 * s
+            Timer { interval: 1000; running: true; repeat: true; onTriggered: clk.text = Qt.formatTime(new Date(), "HH.mm") }
             layer.enabled: true; layer.effect: DropShadow { color: "#aa000000"; radius: 6; samples: 8; horizontalOffset: 2 * s; verticalOffset: 2 * s }
             Behavior on color { ColorAnimation { duration: 300 } }
         }
         Text {
             text: Qt.formatDate(new Date(), "dddd, MMMM d").toUpperCase()
-            color: root.dynamicAccentForWallpaper(root.accent2); font.family: pf.name; font.pixelSize: 12 * s; font.letterSpacing: 4 * s
+            color: root.dynamicAccentForWallpaper(root.accent2); font.family: pf.name; font.pixelSize: 15 * s; font.letterSpacing: 4 * s
+            layer.enabled: true; layer.effect: DropShadow { color: "#aa000000"; radius: 3; samples: 8; horizontalOffset: 2 * s; verticalOffset: 2 * s }
+            width: clk.width
+            horizontalAlignment: Text.AlignHCenter
             Behavior on color { ColorAnimation { duration: 300 } }
         }
     }
@@ -243,7 +299,7 @@ Rectangle {
                 // Background fill
                 Rectangle {
                     anchors.fill: parent
-                    color: "#cc14101a"
+                    color: root.panelBg
                 }
 
                 Image {
@@ -320,9 +376,27 @@ Rectangle {
 
         // Pass Input
         Item {
+            id: pwdContainer
             width: parent.width; height: 36 * s
+            property real shakeOffset: 0
+            x: shakeOffset
+
+            // Border tipis: kiri, kanan, atas (transparan/samar)
+            // Ganti 3 Rectangle border (top/left/right) yang terpisah jadi satu ini:
+            Rectangle {
+                anchors.fill: parent
+                color: "transparent"
+                border.color: root.readableAccent(root.accent3)
+                border.width: 2 * s
+                opacity: 0.6
+                topLeftRadius: 10 * s
+                topRightRadius: 10 * s
+                bottomLeftRadius: 0
+                bottomRightRadius: 0
+            }
+
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1 * s; color: root.readableAccent(root.accent3); opacity: pwd.activeFocus ? 1.0 : 0.4 }
-            Rectangle { anchors.bottom: parent.bottom; width: pwd.activeFocus ? parent.width : 0; height: 2 * s; color: root.peachSky; anchors.horizontalCenter: parent.horizontalCenter; Behavior on width { NumberAnimation {duration: 300; easing.type: Easing.OutExpo} } }
+            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 2 * s; color: root.peachSky; anchors.horizontalCenter: parent.horizontalCenter; opacity: pwd.activeFocus ? 1.0 : 0.3; Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutExpo } } }
             TextInput {
                 id: pwd; anchors.fill: parent; color: root.peachSky; font.family: pf.name; font.pixelSize: 18 * s; font.letterSpacing: 4 * s
                 echoMode: TextInput.Password; onTextEdited: err.text = ""; passwordCharacter: "─"; focus: true; clip: true; horizontalAlignment: TextInput.AlignHCenter; verticalAlignment: TextInput.AlignVCenter
@@ -331,6 +405,9 @@ Rectangle {
                 property bool wasClicked: false
                 onActiveFocusChanged: if (!activeFocus && text.length === 0) wasClicked = false
                 Keys.onReturnPressed: doLogin(); Keys.onEnterPressed: doLogin()
+                // === KEYBOARD NAVIGATION: chain dimulai dari sini ===
+                KeyNavigation.tab: prevBtnFocus
+                KeyNavigation.backtab: powerContainer
             }
             Text { 
                 anchors.centerIn: parent; text: "password..."; color: root.readableAccent(root.accent3); font.family: pf.name; font.pixelSize: 14 * s; font.letterSpacing: 4 * s
@@ -367,16 +444,25 @@ Rectangle {
 
             // PREV Button
             Item {
+                id: prevBtnFocus
                 width: prevText.implicitWidth + 16 * s
                 height: 36 * s
                 visible: bgLoader.item ? true : false
+                // === KEYBOARD NAVIGATION ===
+                activeFocusOnTab: true
+                KeyNavigation.tab: loginBtnFocus
+                KeyNavigation.backtab: pwd
+                Keys.onReturnPressed: { if (bgLoader.item) bgLoader.item.prevWallpaper() }
+                Keys.onSpacePressed: { if (bgLoader.item) bgLoader.item.prevWallpaper() }
+
                 Rectangle {
                     anchors.fill: parent
-                    color: prevMouse.containsMouse ? root.accent3 : "#cc14101a"
-                    border.color: root.readableAccent(root.accent3)
-                    border.width: 1
+                    color: prevMouse.containsMouse ? root.accent3 : root.panelBg
+                    border.color: prevBtnFocus.activeFocus ? root.peachSky : root.readableAccent(root.accent3)
+                    border.width: prevBtnFocus.activeFocus ? 2 * s : 1
                     radius: 4 * s
                     Behavior on color { ColorAnimation { duration: 150 } }
+                    Behavior on border.color { ColorAnimation { duration: 150 } }
                 }
                 Text {
                     id: prevText
@@ -393,30 +479,56 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: { if (bgLoader.item) bgLoader.item.prevWallpaper() }
+                    onClicked: { prevBtnFocus.forceActiveFocus(); if (bgLoader.item) bgLoader.item.prevWallpaper() }
                 }
             }
 
             // Login Button
             Item {
+                id: loginBtnFocus
                 width: 140 * s; height: 36 * s
-                Rectangle { anchors.fill: parent; color: sbm.containsMouse ? root.accent3 : "#cc14101a"; border.color: root.readableAccent(root.accent3); border.width: 1; radius: 4 * s; Behavior on color { ColorAnimation { duration: 150 } } }
+                // === KEYBOARD NAVIGATION ===
+                activeFocusOnTab: true
+                KeyNavigation.tab: nextBtnFocus
+                KeyNavigation.backtab: prevBtnFocus
+                Keys.onReturnPressed: doLogin()
+                Keys.onSpacePressed: doLogin()
+
+                Rectangle {
+                anchors.fill: parent
+                color: sbm.containsMouse ? root.accent3 : root.panelBg
+                border.color: loginBtnFocus.activeFocus ? root.peachSky : root.readableAccent(root.accent3)
+                border.width: loginBtnFocus.activeFocus ? 2 * s : 1
+                radius: 4 * s
+
+                Behavior on color { ColorAnimation { duration: 150 } }
+                Behavior on border.color { ColorAnimation { duration: 150 } }
+            }
                 Text { anchors.centerIn: parent; text: "LOG IN"; color: sbm.containsMouse ? root.contrastText(root.accent3) : root.readableAccent(root.accent3); font.family: pf.name; font.pixelSize: 12 * s; font.letterSpacing: 4 * s; Behavior on color { ColorAnimation { duration: 150 } } }
-                MouseArea { id: sbm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: doLogin() }
+                MouseArea { id: sbm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { loginBtnFocus.forceActiveFocus(); doLogin() } }
             }
 
             // NEXT Button
             Item {
+                id: nextBtnFocus
                 width: nextText.implicitWidth + 16 * s
                 height: 36 * s
                 visible: bgLoader.item ? true : false
+                // === KEYBOARD NAVIGATION ===
+                activeFocusOnTab: true
+                KeyNavigation.tab: modeContainer
+                KeyNavigation.backtab: loginBtnFocus
+                Keys.onReturnPressed: { if (bgLoader.item) bgLoader.item.nextWallpaper() }
+                Keys.onSpacePressed: { if (bgLoader.item) bgLoader.item.nextWallpaper() }
+
                 Rectangle {
                     anchors.fill: parent
-                    color: nextMouse.containsMouse ? root.accent3 : "#cc14101a"
-                    border.color: root.readableAccent(root.accent3)
-                    border.width: 1
+                    color: nextMouse.containsMouse ? root.accent3 : root.panelBg
+                    border.color: nextBtnFocus.activeFocus ? root.peachSky : root.readableAccent(root.accent3)
+                    border.width: nextBtnFocus.activeFocus ? 2 * s : 1
                     radius: 4 * s
                     Behavior on color { ColorAnimation { duration: 150 } }
+                    Behavior on border.color { ColorAnimation { duration: 150 } }
                 }
                 Text {
                     id: nextText
@@ -433,11 +545,11 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: { if (bgLoader.item) bgLoader.item.nextWallpaper() }
+                    onClicked: { nextBtnFocus.forceActiveFocus(); if (bgLoader.item) bgLoader.item.nextWallpaper() }
                 }
             }
         }
-        Text { id: err; text: ""; height: 12 * s; verticalAlignment: Text.AlignBottom; color: "#ff5555"; anchors.horizontalCenter: parent.horizontalCenter; font.family: pf.name; font.pixelSize: 12 * s }
+        Text { id: err; text: ""; height: 12 * s; verticalAlignment: Text.AlignBottom; color: root.readableAccent(root.accent1); anchors.horizontalCenter: parent.horizontalCenter; font.family: pf.name; font.pixelSize: 12 * s }
     }
 
     // Top Island Panel (Unified Mode, Session, and Power Controls)
@@ -496,17 +608,51 @@ Rectangle {
             width: modeBtn.width
             height: 36 * s
             property bool isOpen: topIslandPanel.openDropdown === "mode"
+            property int highlightIndex: 0
+            property var dropdownList: {
+                var active = bgLoader.item ? bgLoader.item.activeMode : "hybrid";
+                var list = ["hybrid", "video", "image", "stay"];
+                return list.filter(function(item) { return item !== active; });
+            }
+            // === KEYBOARD NAVIGATION ===
+            activeFocusOnTab: true
+            KeyNavigation.tab: animToggleContainer
+            KeyNavigation.backtab: nextBtnFocus
+            Keys.onReturnPressed: modeContainer.confirmOrOpen()
+            Keys.onSpacePressed: modeContainer.confirmOrOpen()
+            Keys.onEscapePressed: topIslandPanel.openDropdown = ""
+            Keys.onDownPressed: if (modeContainer.isOpen) modeContainer.highlightIndex = Math.min(modeContainer.highlightIndex + 1, modeContainer.dropdownList.length - 1)
+            Keys.onUpPressed: if (modeContainer.isOpen) modeContainer.highlightIndex = Math.max(modeContainer.highlightIndex - 1, 0)
+
+            function confirmOrOpen() {
+                if (!modeContainer.isOpen) {
+                    topIslandPanel.openDropdown = "mode";
+                    modeContainer.highlightIndex = 0;
+                } else {
+                    if (modeContainer.dropdownList.length > 0 && bgLoader.item) {
+                        bgLoader.item.changeMode(modeContainer.dropdownList[modeContainer.highlightIndex]);
+                    }
+                    topIslandPanel.openDropdown = "";
+                }
+            }
+
+            onActiveFocusChanged: {
+                if (!activeFocus && topIslandPanel.openDropdown === "mode") {
+                    topIslandPanel.openDropdown = "";
+                }
+            }
 
             // Active Mode Button (Solid)
             Rectangle {
                 id: modeBtn
                 height: 36 * s
                 width: modeRow.implicitWidth + 30 * s
-                color: (modeBtnMouse.containsMouse || modeContainer.isOpen) ? root.accent4 : "#cc14101a"
-                border.color: root.readableAccent(root.accent4)
-                border.width: 1
+                color: (modeBtnMouse.containsMouse || modeContainer.isOpen) ? root.accent4 : root.panelBg
+                border.color: modeContainer.activeFocus ? root.peachSky : root.readableAccent(root.accent4)
+                border.width: modeContainer.activeFocus ? 2 * s : 1
                 radius: 8 * s
                 Behavior on color { ColorAnimation { duration: 150 } }
+                Behavior on border.color { ColorAnimation { duration: 150 } }
 
                 Row {
                     id: modeRow
@@ -542,7 +688,7 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: topIslandPanel.openDropdown = (modeContainer.isOpen ? "" : "mode")
+                    onClicked: { modeContainer.forceActiveFocus(); topIslandPanel.openDropdown = (modeContainer.isOpen ? "" : "mode") }
                 }
             }
 
@@ -556,15 +702,11 @@ Rectangle {
                 visible: modeContainer.isOpen
 
                 Repeater {
-                    model: {
-                        var active = bgLoader.item ? bgLoader.item.activeMode : "hybrid";
-                        var list = ["hybrid", "video", "image", "stay"];
-                        return list.filter(function(item) { return item !== active; });
-                    }
+                    model: modeContainer.dropdownList
                     delegate: Rectangle {
                         width: parent.width
                         height: 32 * s
-                        color: optMouse.containsMouse ? root.accent4 : "#cc14101a"
+                        color: (optMouse.containsMouse || index === modeContainer.highlightIndex) ? root.accent4 : root.panelBg
                         border.color: root.readableAccent(root.accent4)
                         border.width: 1
                         radius: 8 * s
@@ -583,12 +725,12 @@ Rectangle {
                                 fillMode: Image.PreserveAspectFit
                                 layer.enabled: true
                                 layer.effect: ColorOverlay {
-                                    color: optMouse.containsMouse ? root.contrastText(root.accent4) : root.readableAccent(root.accent4)
+                                    color: (optMouse.containsMouse || index === modeContainer.highlightIndex) ? root.contrastText(root.accent4) : root.readableAccent(root.accent4)
                                 }
                             }
                             Text {
                                 text: topIslandPanel.getModeLabel(modelData).toUpperCase()
-                                color: optMouse.containsMouse ? root.contrastText(root.accent4) : root.readableAccent(root.accent4)
+                                color: (optMouse.containsMouse || index === modeContainer.highlightIndex) ? root.contrastText(root.accent4) : root.readableAccent(root.accent4)
                                 font.family: pf.name
                                 font.pixelSize: 10 * s
                                 font.letterSpacing: 1 * s
@@ -603,6 +745,7 @@ Rectangle {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
+                            onEntered: modeContainer.highlightIndex = index
                             onClicked: {
                                 if (bgLoader.item) {
                                     bgLoader.item.changeMode(modelData);
@@ -615,6 +758,76 @@ Rectangle {
             }
         }
 
+        // 1.5 DYNAMIC WALLPAPER TRANSITION CYCLE BUTTON
+        Item {
+            id: animToggleContainer
+            width: animToggleBtn.width
+            height: 36 * s
+            // === KEYBOARD NAVIGATION ===
+            activeFocusOnTab: true
+            KeyNavigation.tab: sessionContainer
+            KeyNavigation.backtab: modeContainer
+            Keys.onReturnPressed: { if (bgLoader.item) bgLoader.item.cycleTransition() }
+            Keys.onSpacePressed: { if (bgLoader.item) bgLoader.item.cycleTransition() }
+
+            Rectangle {
+                id: animToggleBtn
+                height: 36 * s
+                width: animToggleRow.implicitWidth + 30 * s
+                color: animToggleMouse.containsMouse ? root.accent4 : root.panelBg
+                border.color: animToggleContainer.activeFocus ? root.peachSky : root.readableAccent(root.accent4)
+                border.width: animToggleContainer.activeFocus ? 2 * s : 1
+                radius: 8 * s
+                Behavior on color { ColorAnimation { duration: 150 } }
+                Behavior on border.color { ColorAnimation { duration: 150 } }
+
+                Row {
+                    id: animToggleRow
+                    anchors.centerIn: parent
+                    spacing: 8 * s
+                    Image {
+                        source: "icons/transition_mode.svg"
+                        width: 16 * s
+                        height: 16 * s
+                        sourceSize.width: width
+                        sourceSize.height: height
+                        fillMode: Image.PreserveAspectFit
+                        anchors.verticalCenter: parent.verticalCenter
+                        layer.enabled: true
+                        layer.effect: ColorOverlay {
+                            color: animToggleMouse.containsMouse ? root.contrastText(root.accent4) : root.readableAccent(root.accent4)
+                        }
+                    }
+                    Text {
+                        text: {
+                            if (!bgLoader.item) return "FX: FADE"
+                            var trans = bgLoader.item.activeTransition
+                            if (trans === "none") return "FX: OFF"
+                            return "FX: " + trans.toUpperCase()
+                        }
+                        color: animToggleMouse.containsMouse ? root.contrastText(root.accent4) : root.readableAccent(root.accent4)
+                        font.family: pf.name
+                        font.pixelSize: 11 * s
+                        font.letterSpacing: 1 * s
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.verticalCenterOffset: 1.5 * s
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                    }
+                }
+
+                MouseArea {
+                    id: animToggleMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        animToggleContainer.forceActiveFocus();
+                        if (bgLoader.item) bgLoader.item.cycleTransition();
+                    }
+                }
+            }
+        }
+
         // 2. SESSION CYCLE SELECTOR (No Dropdown - click to cycle)
         Item {
             id: sessionContainer
@@ -622,16 +835,23 @@ Rectangle {
             width: sessionBtn.width
             height: 36 * s
             readonly property string activeSessionName: (sessionHelper.currentItem && sessionHelper.currentItem.sName) ? sessionHelper.currentItem.sName : "Session"
+            // === KEYBOARD NAVIGATION ===
+            activeFocusOnTab: true
+            KeyNavigation.tab: powerContainer
+            KeyNavigation.backtab: animToggleContainer
+            Keys.onReturnPressed: { if (typeof sessionModel !== "undefined" && sessionModel.rowCount() > 0) root.sessionIndex = (root.sessionIndex + 1) % sessionModel.rowCount() }
+            Keys.onSpacePressed: { if (typeof sessionModel !== "undefined" && sessionModel.rowCount() > 0) root.sessionIndex = (root.sessionIndex + 1) % sessionModel.rowCount() }
 
             Rectangle {
                 id: sessionBtn
                 height: 36 * s
                 width: sessionRow.implicitWidth + 30 * s
-                color: sessionBtnMouse.containsMouse ? root.accent5 : "#cc14101a"
-                border.color: root.readableAccent(root.accent5)
-                border.width: 1
+                color: sessionBtnMouse.containsMouse ? root.accent5 : root.panelBg
+                border.color: sessionContainer.activeFocus ? root.peachSky : root.readableAccent(root.accent5)
+                border.width: sessionContainer.activeFocus ? 2 * s : 1
                 radius: 8 * s
                 Behavior on color { ColorAnimation { duration: 150 } }
+                Behavior on border.color { ColorAnimation { duration: 150 } }
 
                 Row {
                     id: sessionRow
@@ -668,6 +888,7 @@ Rectangle {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
+                        sessionContainer.forceActiveFocus();
                         if (typeof sessionModel !== "undefined" && sessionModel.rowCount() > 0) {
                             root.sessionIndex = (root.sessionIndex + 1) % sessionModel.rowCount();
                         }
@@ -682,15 +903,58 @@ Rectangle {
             width: 36 * s
             height: 36 * s
             property bool isOpen: topIslandPanel.openDropdown === "power"
+            property int highlightIndex: 0
+            readonly property var powerOptions: [
+                { l: "SLEEP", i: "icons/sleep.svg", a: 2 },
+                { l: "SHUTDOWN", i: "icons/shutdown.svg", a: 1 },
+                { l: "REBOOT", i: "icons/restart.svg", a: 0 }
+            ]
+            // === KEYBOARD NAVIGATION: penutup chain, balik lagi ke pwd ===
+            activeFocusOnTab: true
+            KeyNavigation.tab: pwd
+            KeyNavigation.backtab: sessionContainer
+            Keys.onReturnPressed: powerContainer.confirmOrOpen()
+            Keys.onSpacePressed: powerContainer.confirmOrOpen()
+            Keys.onEscapePressed: topIslandPanel.openDropdown = ""
+            Keys.onDownPressed: if (powerContainer.isOpen) powerContainer.highlightIndex = Math.min(powerContainer.highlightIndex + 1, powerContainer.powerOptions.length - 1)
+            Keys.onUpPressed: if (powerContainer.isOpen) powerContainer.highlightIndex = Math.max(powerContainer.highlightIndex - 1, 0)
+
+            function confirmOrOpen() {
+                if (!powerContainer.isOpen) {
+                    topIslandPanel.openDropdown = "power";
+                    powerContainer.highlightIndex = 0;
+                } else {
+                    powerContainer.executeAction(powerContainer.powerOptions[powerContainer.highlightIndex].a);
+                    topIslandPanel.openDropdown = "";
+                }
+            }
+
+            onActiveFocusChanged: {
+                if (!activeFocus && topIslandPanel.openDropdown === "power") {
+                    topIslandPanel.openDropdown = "";
+                }
+            }
+
+            function executeAction(a) {
+                if (a === 0) {
+                    if (typeof sddm !== "undefined") sddm.reboot();
+                } else if (a === 1) {
+                    if (typeof sddm !== "undefined") sddm.powerOff();
+                } else if (a === 2) {
+                    if (typeof sddm !== "undefined" && sddm.canSuspend) sddm.suspend();
+                }
+            }
+            
 
             // Power Icon Button (Solid)
             Rectangle {
                 anchors.fill: parent
-                color: (powerBtnMouse.containsMouse || powerContainer.isOpen) ? root.accent6 : "#cc14101a"
-                border.color: root.readableAccent(root.accent6)
-                border.width: 1
+                color: (powerBtnMouse.containsMouse || powerContainer.isOpen) ? root.accent6 : root.panelBg
+                border.color: powerContainer.activeFocus ? root.peachSky : root.readableAccent(root.accent6)
+                border.width: powerContainer.activeFocus ? 2 * s : 1
                 radius: 8 * s
                 Behavior on color { ColorAnimation { duration: 150 } }
+                Behavior on border.color { ColorAnimation { duration: 150 } }
 
                 Image {
                     source: "icons/power_button.svg"
@@ -711,7 +975,7 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: topIslandPanel.openDropdown = (powerContainer.isOpen ? "" : "power")
+                    onClicked: { powerContainer.forceActiveFocus(); topIslandPanel.openDropdown = (powerContainer.isOpen ? "" : "power") }
                 }
             }
 
@@ -725,15 +989,11 @@ Rectangle {
                 visible: parent.isOpen
 
                 Repeater {
-                    model: [
-                        { l: "SLEEP", i: "icons/sleep.svg", a: 2 },
-                        { l: "SHUTDOWN", i: "icons/shutdown.svg", a: 1 },
-                        { l: "REBOOT", i: "icons/restart.svg", a: 0 }
-                    ]
+                    model: powerContainer.powerOptions
                     delegate: Rectangle {
                         width: parent.width
                         height: 32 * s
-                        color: optPowerMouse.containsMouse ? root.accent6 : "#cc14101a"
+                        color: (optPowerMouse.containsMouse || index === powerContainer.highlightIndex) ? root.accent6 : root.panelBg
                         border.color: root.readableAccent(root.accent6)
                         border.width: 1
                         radius: 6 * s
@@ -754,12 +1014,12 @@ Rectangle {
                                 fillMode: Image.PreserveAspectFit
                                 layer.enabled: true
                                 layer.effect: ColorOverlay {
-                                    color: optPowerMouse.containsMouse ? root.contrastText(root.accent6) : root.readableAccent(root.accent6)
+                                    color: (optPowerMouse.containsMouse || index === powerContainer.highlightIndex) ? root.contrastText(root.accent6) : root.readableAccent(root.accent6)
                                 }
                             }
                             Text {
                                 text: modelData.l
-                                color: optPowerMouse.containsMouse ? root.contrastText(root.accent6) : root.readableAccent(root.accent6)
+                                color: (optPowerMouse.containsMouse || index === powerContainer.highlightIndex) ? root.contrastText(root.accent6) : root.readableAccent(root.accent6)
                                 font.family: pf.name
                                 font.pixelSize: 10 * s
                                 font.letterSpacing: 1 * s
@@ -774,15 +1034,10 @@ Rectangle {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
+                            onEntered: powerContainer.highlightIndex = index
                             onClicked: {
                                 topIslandPanel.openDropdown = "";
-                                if (modelData.a === 0) {
-                                    if (typeof sddm !== "undefined") sddm.reboot();
-                                } else if (modelData.a === 1) {
-                                    if (typeof sddm !== "undefined") sddm.powerOff();
-                                } else if (modelData.a === 2) {
-                                    if (typeof sddm !== "undefined" && sddm.canSuspend) sddm.suspend();
-                                }
+                                powerContainer.executeAction(modelData.a);
                             }
                         }
                     }
@@ -801,7 +1056,63 @@ Rectangle {
 
     Connections {
         target: typeof sddm !== "undefined" ? sddm : null
-        function onLoginFailed() { err.text = "ACCESS DENIED"; pwd.text = ""; pwd.focus = true }
+        function onLoginFailed() {
+            loginDelayTimer.stop();
+            loginFadeAnim.stop();
+            bgLoader.opacity = 1;
+            root.ui = 1;
+            err.text = "ACCESS DENIED";
+            errClearTimer.restart();
+            pwd.text = "";
+            pwd.focus = true;
+            shakeAnim.start();
+        }
     }
-    function doLogin() { var u = (userHelper.currentItem && userHelper.currentItem.uLogin) ? userHelper.currentItem.uLogin : (typeof userModel !== "undefined" ? userModel.lastUser : ""); if (typeof sddm !== "undefined") sddm.login(u, pwd.text, root.sessionIndex) }
+
+    function doLogin() {
+        if (pwd.text.length === 0) {
+            err.text = "PASSWORD REQUIRED";
+            errClearTimer.restart();
+            pwd.forceActiveFocus();
+            shakeAnim.start();
+            return;
+        }
+        loginFadeAnim.start();
+        loginDelayTimer.start();
+    }
+
+    ParallelAnimation {
+        id: loginFadeAnim
+        NumberAnimation { target: bgLoader; property: "opacity"; from: 1; to: 0; duration: 500; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: root; property: "ui"; from: 1; to: 0; duration: 500; easing.type: Easing.InOutQuad }
+        
+    }
+
+    SequentialAnimation {
+        id: shakeAnim
+        NumberAnimation { target: pwdContainer; property: "shakeOffset"; to: -10 * s; duration: 60; easing.type: Easing.OutQuad }
+        NumberAnimation { target: pwdContainer; property: "shakeOffset"; to: 10 * s; duration: 60; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: pwdContainer; property: "shakeOffset"; to: -8 * s; duration: 60; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: pwdContainer; property: "shakeOffset"; to: 8 * s; duration: 60; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: pwdContainer; property: "shakeOffset"; to: 0; duration: 60; easing.type: Easing.InOutQuad }
+    }
+
+    Timer {
+        id: errClearTimer
+        interval: 1000
+        repeat: false
+        onTriggered: err.text = ""
+    }
+
+    Timer {
+        id: loginDelayTimer
+        interval: 500
+        repeat: false
+        onTriggered: {
+            var u = (userHelper.currentItem && userHelper.currentItem.uLogin) ? userHelper.currentItem.uLogin : (typeof userModel !== "undefined" ? userModel.lastUser : "");
+            if (typeof sddm !== "undefined") sddm.login(u, pwd.text, root.sessionIndex);
+        }
+    }
+
+
 }
