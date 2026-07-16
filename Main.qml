@@ -20,6 +20,10 @@ Rectangle {
     property int userIndex: userModel.lastIndex >= 0 ? userModel.lastIndex : 0
     property real ui: 0
 
+// ===== INTRO / LOCK-UNLOCK STATE =====
+    property bool clockCentered: true      // true = fase intro/clock-only, false = login UI aktif
+    property real loginUiOpacity: 0        // opacity khusus elemen login (avatar/password/tombol/island)
+
     readonly property color roseUI: "#d05870"
     readonly property color peachSky: "#f0a060"
     readonly property color sunCream: "#fae8d0"
@@ -175,25 +179,70 @@ Rectangle {
     ListView { id: userHelper; model: typeof userModel !== "undefined" ? userModel : null; currentIndex: root.userIndex; opacity: 0; width: 100; height: 100; z: -100; delegate: Item { property string uName: model.realName || model.name || ""; property string uLogin: model.name || ""; property string uIcon: model.icon || "" } }
 
     // Auto-focus fix for Quickshell (Loader does not propagate focus: true)
-    Timer { interval: 300; running: true; onTriggered: pwd.forceActiveFocus() }
+    
+    Timer {
+        id: focusPwdOnce
+        interval: 300
+        running: false
+        repeat: false
+        onTriggered: {
+            if (!root.clockCentered) pwd.forceActiveFocus()
+        }
+    }
+
+    Timer {
+        id: idleTimer
+        interval: 15000 // 30 detik
+        repeat: false
+        onTriggered: {
+            root.goToLockScreen();
+        }
+    }
+
+    function resetIdleTimer() {
+        if (!root.clockCentered) {
+            console.log("idle reset @ " + Date.now());
+            idleTimer.restart();
+        }
+    }
 
     Component.onCompleted: {
-        fadeAnim.start();
+        // fadeAnim.start();
         keyboard.numLock = true;
-        initialColorTimer.start();
+        // initialColorTimer.start();
         // rootFadeIn.start();
     }
 
     
 
-    // Auto-redirect: kalau user ngetik huruf/angka di mana pun (misal fokus lagi di tombol),
-// otomatis lempar fokus + karakter itu ke field password
+    Keys.onEscapePressed: {
+        if (!clockCentered) {
+            goToLockScreen();
+        }
+    }
+
     Keys.onPressed: (event) => {
-        // Kalau pwd sudah fokus, biarkan TextInput yang handle sendiri (jangan diganggu)
+        root.resetIdleTimer();
+
         if (pwd.activeFocus) return;
 
-        // Cuma tangkap karakter yang "ketik-able" (huruf, angka, simbol printable)
+        if (event.key === Qt.Key_Backspace) {
+            if (clockCentered) {
+                wakeToLogin();
+            }
+            pwd.forceActiveFocus();
+            pwd.wasClicked = true;
+            if (pwd.text.length > 0) {
+                pwd.text = pwd.text.slice(0, -1);
+            }
+            event.accepted = true;
+            return;
+        }
+
         if (event.text && event.text.length > 0 && /^[\x20-\x7E]$/.test(event.text)) {
+            if (clockCentered) {
+                wakeToLogin();
+            }
             pwd.forceActiveFocus();
             pwd.wasClicked = true;
             pwd.text += event.text;
@@ -201,6 +250,37 @@ Rectangle {
         }
     }
 
+    function wakeToLogin() {
+        clockCentered = false;
+        loginRevealAnim.start();
+        focusPwdOnce.restart();
+        idleTimer.restart();
+    }
+
+    function goToLockScreen() {
+        loginHideAnim.start();
+    }
+
+    NumberAnimation {
+        id: loginRevealAnim
+        target: root; property: "loginUiOpacity"
+        from: 0; to: 1; duration: 500; easing.type: Easing.OutQuad
+    }
+
+    SequentialAnimation {
+        id: loginHideAnim
+        NumberAnimation { target: root; property: "loginUiOpacity"; from: 1; to: 0; duration: 400; easing.type: Easing.InOutQuad }
+        ScriptAction {
+            script: {
+                clockCentered = true;
+                pwd.focus = false;
+                root.forceActiveFocus(); 
+                topIslandPanel.openDropdown = "";
+                idleTimer.stop();
+            }
+        }
+    }
+    
     Timer {
         id: initialColorTimer
         interval: 200
@@ -223,22 +303,52 @@ Rectangle {
         easing.type: Easing.OutQuad
     }
 
+    SequentialAnimation {
+        id: introSequence
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: fadeAnim.start() }
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: root.clockCentered = false }
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: loginRevealAnim.start() }
+        ScriptAction { script: focusPwdOnce.restart() }
+        ScriptAction { script: idleTimer.restart() }
+    }
+
     Loader {
         id: bgLoader
         anchors.fill: parent
         source: "BackgroundVideo.qml"
         opacity: 0
+        layer.enabled: true
+        layer.effect: FastBlur {
+            radius: root.clockCentered ? 42 : 0
+            Behavior on radius {
+                NumberAnimation { duration: 900; easing.type: Easing.InOutQuint }
+            }
+        }
         onLoaded: {
             if (item) {
                 item.backgroundReady.connect(function() {
                     rootFadeIn.start()
+                    introSequence.start()
+                    initialColorTimer.start()
                 })
-                // Jaga-jaga kalau ternyata sudah ready duluan sebelum sempat connect
                 if (item.backgroundReadyFlag) {
                     rootFadeIn.start()
+                    introSequence.start()
+                    initialColorTimer.start()
                 }
             }
         }
+    }
+
+    // Klik kiri di mana aja saat clock-only -> wake ke login UI
+    MouseArea {
+        anchors.fill: parent
+        enabled: root.clockCentered
+        onClicked: root.wakeToLogin()
+        z: 40
     }
 
     // View Overlays
@@ -248,32 +358,55 @@ Rectangle {
     // HUD Section
 
     // Clock Unit
-    Column {
-        anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 60 * s
-        spacing: 4 * s; opacity: root.ui
-        
-        Text {
-            id: clk; text: Qt.formatTime(new Date(), "HH.mm")
-            color: root.dynamicAccentForWallpaper(root.accent1); font.family: clock.name; font.pixelSize: 100 * s; font.letterSpacing: -2 * s
-            Timer { interval: 1000; running: true; repeat: true; onTriggered: clk.text = Qt.formatTime(new Date(), "HH.mm") }
-            layer.enabled: true; layer.effect: DropShadow { color: "#aa000000"; radius: 6; samples: 8; horizontalOffset: 2 * s; verticalOffset: 2 * s }
-            Behavior on color { ColorAnimation { duration: 300 } }
+    Item {
+        anchors.fill: parent
+        z: 50
+
+        Column {
+            id: clockColumn
+            spacing: 4 * s
+            opacity: root.ui
+
+            x: root.clockCentered ? (parent.width - width) / 2 : 60 * s
+            y: root.clockCentered ? (parent.height - height) / 2 : 60 * s
+            Behavior on x { NumberAnimation { duration: 900; easing.type: Easing.InOutQuint } }
+            Behavior on y { NumberAnimation { duration: 900; easing.type: Easing.InOutQuint } }
+
+            Text {
+                id: clk; text: Qt.formatTime(new Date(), "HH.mm")
+                color: root.dynamicAccentForWallpaper(root.accent1); font.family: clock.name
+                font.pixelSize: (root.clockCentered ? 160 : 100) * s
+                font.letterSpacing: -2 * s
+                Behavior on font.pixelSize { NumberAnimation { duration: 900; easing.type: Easing.InOutQuint } }
+                Timer { interval: 1000; running: true; repeat: true; onTriggered: clk.text = Qt.formatTime(new Date(), "HH.mm") }
+                layer.enabled: true; layer.effect: DropShadow { color: "#aa000000"; radius: 6; samples: 8; horizontalOffset: 2 * s; verticalOffset: 2 * s }
+                Behavior on color { ColorAnimation { duration: 300 } }
+            }
+            Text {
+                text: Qt.formatDate(new Date(), "dddd, MMMM d").toUpperCase()
+                color: root.dynamicAccentForWallpaper(root.accent2); font.family: pf.name; font.pixelSize: 15 * s; font.letterSpacing: 4 * s
+                layer.enabled: true; layer.effect: DropShadow { color: "#aa000000"; radius: 3; samples: 8; horizontalOffset: 2 * s; verticalOffset: 2 * s }
+                width: clk.width
+                horizontalAlignment: Text.AlignHCenter
+                Behavior on color { ColorAnimation { duration: 300 } }
+            }
+
+            
         }
-        Text {
-            text: Qt.formatDate(new Date(), "dddd, MMMM d").toUpperCase()
-            color: root.dynamicAccentForWallpaper(root.accent2); font.family: pf.name; font.pixelSize: 15 * s; font.letterSpacing: 4 * s
-            layer.enabled: true; layer.effect: DropShadow { color: "#aa000000"; radius: 3; samples: 8; horizontalOffset: 2 * s; verticalOffset: 2 * s }
-            width: clk.width
-            horizontalAlignment: Text.AlignHCenter
-            Behavior on color { ColorAnimation { duration: 300 } }
-        }
+        // Klik jam saat login UI aktif -> balik ke clock only
+            MouseArea {
+                anchors.fill: clockColumn
+                enabled: !root.clockCentered
+                onClicked: root.goToLockScreen()
+                z: 1
+            }
     }
 
     // Login Unit
     Column {
         anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter; anchors.margins: 60 * s
-        width: 320 * s; spacing: 20 * s; opacity: root.ui
-
+        width: 320 * s; spacing: 20 * s; opacity: root.loginUiOpacity 
+        enabled: !root.clockCentered  
         // User Avatar
         Item {
             anchors.horizontalCenter: parent.horizontalCenter
@@ -399,7 +532,7 @@ Rectangle {
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 2 * s; color: root.peachSky; anchors.horizontalCenter: parent.horizontalCenter; opacity: pwd.activeFocus ? 1.0 : 0.3; Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutExpo } } }
             TextInput {
                 id: pwd; anchors.fill: parent; color: root.peachSky; font.family: pf.name; font.pixelSize: 18 * s; font.letterSpacing: 4 * s
-                echoMode: TextInput.Password; onTextEdited: err.text = ""; passwordCharacter: "─"; focus: true; clip: true; horizontalAlignment: TextInput.AlignHCenter; verticalAlignment: TextInput.AlignVCenter
+                echoMode: TextInput.Password; onTextEdited: { err.text = ""; root.resetIdleTimer(); } passwordCharacter: "─"; focus: false; clip: true; horizontalAlignment: TextInput.AlignHCenter; verticalAlignment: TextInput.AlignVCenter
                 cursorVisible: false; cursorDelegate: Item { width: 0; height: 0 }
                 selectionColor: root.readableAccent(root.accent3)
                 property bool wasClicked: false
@@ -559,7 +692,8 @@ Rectangle {
         anchors.right: parent.right
         anchors.margins: 40 * s
         spacing: 12 * s
-        opacity: root.ui
+        opacity: root.loginUiOpacity 
+        enabled: !root.clockCentered
         z: 300
 
         property string openDropdown: "" // "", "mode", "power"
@@ -620,7 +754,14 @@ Rectangle {
             KeyNavigation.backtab: nextBtnFocus
             Keys.onReturnPressed: modeContainer.confirmOrOpen()
             Keys.onSpacePressed: modeContainer.confirmOrOpen()
-            Keys.onEscapePressed: topIslandPanel.openDropdown = ""
+            Keys.onEscapePressed: (event) => {
+                if (modeContainer.isOpen) {
+                    topIslandPanel.openDropdown = "";
+                    event.accepted = true;
+                } else {
+                    event.accepted = false;   // biarkan bubble ke root
+                }
+            }
             Keys.onDownPressed: if (modeContainer.isOpen) modeContainer.highlightIndex = Math.min(modeContainer.highlightIndex + 1, modeContainer.dropdownList.length - 1)
             Keys.onUpPressed: if (modeContainer.isOpen) modeContainer.highlightIndex = Math.max(modeContainer.highlightIndex - 1, 0)
 
@@ -636,11 +777,7 @@ Rectangle {
                 }
             }
 
-            onActiveFocusChanged: {
-                if (!activeFocus && topIslandPanel.openDropdown === "mode") {
-                    topIslandPanel.openDropdown = "";
-                }
-            }
+            
 
             // Active Mode Button (Solid)
             Rectangle {
@@ -915,7 +1052,14 @@ Rectangle {
             KeyNavigation.backtab: sessionContainer
             Keys.onReturnPressed: powerContainer.confirmOrOpen()
             Keys.onSpacePressed: powerContainer.confirmOrOpen()
-            Keys.onEscapePressed: topIslandPanel.openDropdown = ""
+            Keys.onEscapePressed: (event) => {
+                if (powerContainer.isOpen) {
+                    topIslandPanel.openDropdown = "";
+                    event.accepted = true;
+                } else {
+                    event.accepted = false;   // biarkan bubble ke root
+                }
+            }
             Keys.onDownPressed: if (powerContainer.isOpen) powerContainer.highlightIndex = Math.min(powerContainer.highlightIndex + 1, powerContainer.powerOptions.length - 1)
             Keys.onUpPressed: if (powerContainer.isOpen) powerContainer.highlightIndex = Math.max(powerContainer.highlightIndex - 1, 0)
 
@@ -929,11 +1073,7 @@ Rectangle {
                 }
             }
 
-            onActiveFocusChanged: {
-                if (!activeFocus && topIslandPanel.openDropdown === "power") {
-                    topIslandPanel.openDropdown = "";
-                }
-            }
+            
 
             function executeAction(a) {
                 if (a === 0) {
@@ -1061,11 +1201,15 @@ Rectangle {
             loginFadeAnim.stop();
             bgLoader.opacity = 1;
             root.ui = 1;
+            root.clockCentered = false;    
+            root.loginUiOpacity = 1;       
             err.text = "ACCESS DENIED";
             errClearTimer.restart();
             pwd.text = "";
             pwd.focus = true;
             shakeAnim.start();
+            focusPwdOnce.restart();
+            idleTimer.restart();
         }
     }
 
@@ -1085,7 +1229,7 @@ Rectangle {
         id: loginFadeAnim
         NumberAnimation { target: bgLoader; property: "opacity"; from: 1; to: 0; duration: 500; easing.type: Easing.InOutQuad }
         NumberAnimation { target: root; property: "ui"; from: 1; to: 0; duration: 500; easing.type: Easing.InOutQuad }
-        
+        NumberAnimation { target: root; property: "loginUiOpacity"; from: 1; to: 0; duration: 500; easing.type: Easing.InOutQuad }
     }
 
     SequentialAnimation {
@@ -1112,6 +1256,34 @@ Rectangle {
             var u = (userHelper.currentItem && userHelper.currentItem.uLogin) ? userHelper.currentItem.uLogin : (typeof userModel !== "undefined" ? userModel.lastUser : "");
             if (typeof sddm !== "undefined") sddm.login(u, pwd.text, root.sessionIndex);
         }
+    }
+
+    HoverHandler {
+        id: idleHoverTracker
+        target: root
+        property point lastPos: Qt.point(-1, -1)
+        onPointChanged: {
+            var p = point.position;
+            if (lastPos.x < 0) {
+                lastPos = p;
+                return;
+            }
+            var dx = p.x - lastPos.x;
+            var dy = p.y - lastPos.y;
+            var distSq = dx * dx + dy * dy;
+            if (distSq > 16) { // > 4px gerakan asli, abaikan jitter sub-pixel
+                lastPos = p;
+                root.resetIdleTimer();
+            }
+        }
+    }
+
+    TapHandler {
+        id: idleTapTracker
+        target: root
+        acceptedButtons: Qt.AllButtons
+        gesturePolicy: TapHandler.PassiveOnly
+        onPressedChanged: if (pressed) root.resetIdleTimer()
     }
 
 
