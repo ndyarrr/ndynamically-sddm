@@ -482,7 +482,7 @@ Rectangle {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: { if (typeof userModel !== "undefined" && userModel.rowCount() > 0) root.userIndex = (root.userIndex + 1) % userModel.rowCount() }
+                onClicked: { root.resetIdleTimer(); if (typeof userModel !== "undefined" && userModel.rowCount() > 0) root.userIndex = (root.userIndex + 1) % userModel.rowCount() }
             }
         }
 
@@ -504,7 +504,7 @@ Rectangle {
                 width: unm.containsMouse ? parent.width : 0; height: 1 * s; color: root.readableAccent(root.accent1); opacity: 0.8
                 Behavior on width { NumberAnimation { duration: 200 } }
             }
-            MouseArea { id: unm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { if (typeof userModel !== "undefined" && userModel.rowCount() > 0) root.userIndex = (root.userIndex + 1) % userModel.rowCount() } }
+            MouseArea { id: unm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { root.resetIdleTimer(); if (typeof userModel !== "undefined" && userModel.rowCount() > 0) root.userIndex = (root.userIndex + 1) % userModel.rowCount() } }
         }
 
         // Pass Input
@@ -563,6 +563,7 @@ Rectangle {
             MouseArea {
                 anchors.fill: parent
                 onClicked: {
+                    root.resetIdleTimer();
                     pwd.forceActiveFocus()
                     pwd.wasClicked = true
                 }
@@ -612,7 +613,7 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: { prevBtnFocus.forceActiveFocus(); if (bgLoader.item) bgLoader.item.prevWallpaper() }
+                    onClicked: { root.resetIdleTimer(); prevBtnFocus.forceActiveFocus(); if (bgLoader.item) bgLoader.item.prevWallpaper() }
                 }
             }
 
@@ -638,7 +639,7 @@ Rectangle {
                 Behavior on border.color { ColorAnimation { duration: 150 } }
             }
                 Text { anchors.centerIn: parent; text: "LOG IN"; color: sbm.containsMouse ? root.contrastText(root.accent3) : root.readableAccent(root.accent3); font.family: pf.name; font.pixelSize: 12 * s; font.letterSpacing: 4 * s; Behavior on color { ColorAnimation { duration: 150 } } }
-                MouseArea { id: sbm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { loginBtnFocus.forceActiveFocus(); doLogin() } }
+                MouseArea { id: sbm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { root.resetIdleTimer(); loginBtnFocus.forceActiveFocus(); doLogin() } }
             }
 
             // NEXT Button
@@ -678,7 +679,7 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: { nextBtnFocus.forceActiveFocus(); if (bgLoader.item) bgLoader.item.nextWallpaper() }
+                    onClicked: { root.resetIdleTimer(); nextBtnFocus.forceActiveFocus(); if (bgLoader.item) bgLoader.item.nextWallpaper() }
                 }
             }
         }
@@ -825,7 +826,7 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: { modeContainer.forceActiveFocus(); topIslandPanel.openDropdown = (modeContainer.isOpen ? "" : "mode") }
+                    onClicked: { root.resetIdleTimer(); modeContainer.forceActiveFocus(); topIslandPanel.openDropdown = (modeContainer.isOpen ? "" : "mode") }
                 }
             }
 
@@ -884,6 +885,7 @@ Rectangle {
                             cursorShape: Qt.PointingHandCursor
                             onEntered: modeContainer.highlightIndex = index
                             onClicked: {
+                                root.resetIdleTimer();
                                 if (bgLoader.item) {
                                     bgLoader.item.changeMode(modelData);
                                 }
@@ -958,6 +960,7 @@ Rectangle {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
+                        root.resetIdleTimer();
                         animToggleContainer.forceActiveFocus();
                         if (bgLoader.item) bgLoader.item.cycleTransition();
                     }
@@ -1025,6 +1028,7 @@ Rectangle {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
+                        root.resetIdleTimer();
                         sessionContainer.forceActiveFocus();
                         if (typeof sessionModel !== "undefined" && sessionModel.rowCount() > 0) {
                             root.sessionIndex = (root.sessionIndex + 1) % sessionModel.rowCount();
@@ -1115,7 +1119,7 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: { powerContainer.forceActiveFocus(); topIslandPanel.openDropdown = (powerContainer.isOpen ? "" : "power") }
+                    onClicked: { root.resetIdleTimer(); powerContainer.forceActiveFocus(); topIslandPanel.openDropdown = (powerContainer.isOpen ? "" : "power") }
                 }
             }
 
@@ -1176,6 +1180,7 @@ Rectangle {
                             cursorShape: Qt.PointingHandCursor
                             onEntered: powerContainer.highlightIndex = index
                             onClicked: {
+                                root.resetIdleTimer();
                                 topIslandPanel.openDropdown = "";
                                 powerContainer.executeAction(modelData.a);
                             }
@@ -1191,7 +1196,7 @@ Rectangle {
         anchors.fill: parent
         z: 150
         enabled: topIslandPanel.openDropdown !== ""
-        onClicked: topIslandPanel.openDropdown = ""
+        onClicked: { root.resetIdleTimer(); topIslandPanel.openDropdown = "" }
     }
 
     Connections {
