@@ -412,14 +412,14 @@ Rectangle {
             anchors.horizontalCenter: parent.horizontalCenter
             width: 80 * s; height: 80 * s
 
-            // Outer border ring
+            // Outer border ring with accent color
             Rectangle {
                 anchors.fill: parent
                 radius: width / 2
                 color: "transparent"
-                border.color: avatarMouse.containsMouse ? root.peachSky : root.readableAccent(root.accent2)
+                border.color: avatarMouse.containsMouse ? root.sunCream : root.readableAccent(root.accent1)
                 border.width: 2 * s
-                Behavior on border.color { ColorAnimation { duration: 150 } }
+                Behavior on border.color { ColorAnimation { duration: 200 } }
             }
 
             // Avatar content (image or fallback letter)
@@ -512,26 +512,81 @@ Rectangle {
             id: pwdContainer
             width: parent.width; height: 36 * s
             property real shakeOffset: 0
+            property real cornerRadius: 10 * s
             x: shakeOffset
 
-            // Border tipis: kiri, kanan, atas (transparan/samar)
-            // Ganti 3 Rectangle border (top/left/right) yang terpisah jadi satu ini:
-            Rectangle {
-                anchors.fill: parent
-                color: "transparent"
-                border.color: root.readableAccent(root.accent3)
-                border.width: 2 * s
-                opacity: 0.6
-                topLeftRadius: 10 * s
-                topRightRadius: 10 * s
-                bottomLeftRadius: 0
-                bottomRightRadius: 0
+            // Real-time Background Blur Source targeting bgLoader.item
+            ShaderEffectSource {
+                id: pwdBgSource
+                sourceItem: bgLoader.item
+                sourceRect: bgLoader.item ? Qt.rect(
+                    pwdContainer.mapToItem(bgLoader, 0, 0).x,
+                    pwdContainer.mapToItem(bgLoader, 0, 0).y,
+                    pwdContainer.width,
+                    pwdContainer.height
+                ) : Qt.rect(0, 0, 1, 1)
+                live: root.loginUiOpacity > 0 && bgLoader.item !== null
+                hideSource: false
             }
 
-            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1 * s; color: root.readableAccent(root.accent3); opacity: pwd.activeFocus ? 1.0 : 0.4 }
-            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 2 * s; color: root.peachSky; anchors.horizontalCenter: parent.horizontalCenter; opacity: pwd.activeFocus ? 1.0 : 0.3; Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutExpo } } }
+            // Clipped Shape Container for top rounded corners
+            Item {
+                anchors.fill: parent
+                clip: true
+
+                // FastBlur source (must be visible: false so OpacityMask exclusively renders it)
+                FastBlur {
+                    id: pwdBlur
+                    width: parent.width
+                    height: parent.height + 20 * s
+                    source: pwdBgSource
+                    radius: 24
+                    cached: false
+                    visible: false
+                }
+
+                // Blur mask with rounded top corners (100% matched to cornerRadius)
+                Rectangle {
+                    id: pwdBlurMask
+                    width: parent.width; height: parent.height + 20 * s
+                    radius: pwdContainer.cornerRadius
+                    color: "black"
+                    visible: false
+                }
+
+                // Apply rounded mask to blurred background
+                OpacityMask {
+                    anchors.fill: parent
+                    source: pwdBlur
+                    maskSource: pwdBlurMask
+                    visible: bgLoader.item !== null && root.loginUiOpacity > 0
+                }
+
+                // Semi-transparent dark glass fill (100% matched to cornerRadius)
+                Rectangle {
+                    width: parent.width; height: parent.height + 20 * s
+                    radius: pwdContainer.cornerRadius
+                    color: Qt.rgba(root.darkBase.r, root.darkBase.g, root.darkBase.b, 0.45)
+                }
+
+                // Border tipis: kiri, kanan, atas dengan Accent Color (100% matched to cornerRadius)
+                Rectangle {
+                    width: parent.width; height: parent.height + 20 * s
+                    radius: pwdContainer.cornerRadius
+                    color: "transparent"
+                    border.color: root.readableAccent(root.accent3)
+                    border.width: 2 * s
+                    opacity: pwd.activeFocus ? 0.8 : 0.4
+                    Behavior on opacity { NumberAnimation { duration: 200 } }
+                    Behavior on border.color { ColorAnimation { duration: 200 } }
+                }
+            }
+
+            // Border bawah dengan Accent Color
+            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1 * s; color: root.readableAccent(root.accent3); opacity: pwd.activeFocus ? 1.0 : 0.4; Behavior on color { ColorAnimation { duration: 200 } } }
+            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 2 * s; color: root.readableAccent(root.accent3); anchors.horizontalCenter: parent.horizontalCenter; opacity: pwd.activeFocus ? 1.0 : 0.3; Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutExpo } } Behavior on color { ColorAnimation { duration: 200 } } }
             TextInput {
-                id: pwd; anchors.fill: parent; color: root.peachSky; font.family: pf.name; font.pixelSize: 18 * s; font.letterSpacing: 4 * s
+                id: pwd; anchors.fill: parent; color: root.readableAccent(root.accent3); font.family: pf.name; font.pixelSize: 18 * s; font.letterSpacing: 4 * s
                 echoMode: TextInput.Password; onTextEdited: { err.text = ""; root.resetIdleTimer(); } passwordCharacter: "─"; focus: false; clip: true; horizontalAlignment: TextInput.AlignHCenter; verticalAlignment: TextInput.AlignVCenter
                 cursorVisible: false; cursorDelegate: Item { width: 0; height: 0 }
                 selectionColor: root.readableAccent(root.accent3)
@@ -544,7 +599,7 @@ Rectangle {
             }
             Text { 
                 anchors.centerIn: parent; text: "password..."; color: root.readableAccent(root.accent3); font.family: pf.name; font.pixelSize: 14 * s; font.letterSpacing: 4 * s
-                opacity: pwd.text.length === 0 ? 0.5 : 0
+                opacity: pwd.text.length === 0 ? 0.6 : 0
                 Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.InOutSine } }
             }
             Rectangle {

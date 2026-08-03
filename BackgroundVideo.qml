@@ -55,6 +55,9 @@ Item {
     // Transition effect: fade, wipe, circle, none
     property string activeTransition: getSetting("activeTransition", "fade")
 
+    // Direction flag for transition (true = next / right, false = prev / left)
+    property bool isNextDirection: true
+
     // Track which direction the current transition is going
     property bool transitionToA: true
 
@@ -284,14 +287,17 @@ Item {
             return;
         }
 
-        transitionInProgress = true;   // ← tambahkan baris ini
+        transitionInProgress = true;
 
         // Stop any running transitions
         fadeInA.stop();
         fadeInB.stop();
-        wipeInA.stop();
-        wipeInB.stop();
-        circleReveal.stop();
+        wipeNextA.stop();
+        wipeNextB.stop();
+        wipePrevA.stop();
+        wipePrevB.stop();
+        circleRevealNext.stop();
+        circleRevealPrev.stop();
         transitionTriggerTimer.stop();
 
         // Reset visual state to pre-transition stable state
@@ -308,12 +314,14 @@ Item {
             layerA.z = 1;
         }
 
-        // Decide which layer gets the new content
+        // Decide which layer gets the new content and pause outgoing media
         if (layerAVisible) {
+            if (playerA.playbackState === MediaPlayer.PlayingState) playerA.pause();
             sourceB = newFile;
             typeB = newType;
             transitionToA = false;
         } else {
+            if (playerB.playbackState === MediaPlayer.PlayingState) playerB.pause();
             sourceA = newFile;
             typeA = newType;
             transitionToA = true;
@@ -333,21 +341,45 @@ Item {
             incoming.z = 2;
             outgoing.z = 1;
             incoming.clip = true;
-            incoming.width = 0;
-        } else if (activeTransition === "circle") {
-            incoming.opacity = 1;
-            incoming.z = 2;
-            outgoing.z = 1;
-            if (transitionToA) {
-                circleSourceA.hideSource = true;
-                circleMask.source = circleSourceA;
+            if (isNextDirection) {
+                incoming.x = 0;
+                incoming.width = 0;
             } else {
-                circleSourceB.hideSource = true;
-                circleMask.source = circleSourceB;
+                incoming.x = bgRoot.width;
+                incoming.width = 0;
+            }
+        } else if (activeTransition === "circle") {
+            if (isNextDirection) {
+                // Next: Incoming expands from center over outgoing
+                incoming.opacity = 1;
+                incoming.z = 2;
+                outgoing.opacity = 1;
+                outgoing.z = 1;
+                if (transitionToA) {
+                    circleSourceA.hideSource = true;
+                    circleMask.source = circleSourceA;
+                } else {
+                    circleSourceB.hideSource = true;
+                    circleMask.source = circleSourceB;
+                }
+                revealCircle.scale = 0;
+            } else {
+                // Prev: Outgoing shrinks to center exposing incoming behind
+                incoming.opacity = 1;
+                incoming.z = 1;
+                outgoing.opacity = 1;
+                outgoing.z = 2;
+                if (transitionToA) {
+                    circleSourceB.hideSource = true;
+                    circleMask.source = circleSourceB;
+                } else {
+                    circleSourceA.hideSource = true;
+                    circleMask.source = circleSourceA;
+                }
+                revealCircle.scale = 1;
             }
             circleMask.visible = true;
             circleMask.z = 3;
-            revealCircle.scale = 0;
         }
 
         // Start checking for readiness
@@ -372,16 +404,24 @@ Item {
             if (transitionToA) fadeInA.start();
             else fadeInB.start();
         } else if (activeTransition === "wipe") {
-            if (transitionToA) wipeInA.start();
-            else wipeInB.start();
+            if (isNextDirection) {
+                if (transitionToA) wipeNextA.start();
+                else wipeNextB.start();
+            } else {
+                if (transitionToA) wipePrevA.start();
+                else wipePrevB.start();
+            }
         } else if (activeTransition === "circle") {
-            circleReveal.start();
+            if (isNextDirection) circleRevealNext.start();
+            else circleRevealPrev.start();
         }
     }
 
     function resetTransitionState() {
         layerA.clip = false;
         layerB.clip = false;
+        layerA.x = 0;
+        layerB.x = 0;
         layerA.width = bgRoot.width;
         layerB.width = bgRoot.width;
         circleSourceA.hideSource = false;
@@ -430,7 +470,8 @@ Item {
     }
 
     function nextWallpaper() {
-        if (transitionInProgress) return;   // ← tambahkan baris ini
+        if (transitionInProgress) return;
+        isNextDirection = true;
         if (folderModel.count > 1) {
             currentIndex = (currentIndex + 1) % folderModel.count;
             selectWallpaperIndex(currentIndex);
@@ -441,7 +482,8 @@ Item {
     }
 
     function prevWallpaper() {
-        if (transitionInProgress) return;   // ← tambahkan baris ini
+        if (transitionInProgress) return;
+        isNextDirection = false;
         if (folderModel.count > 1) {
             currentIndex = (currentIndex - 1 + folderModel.count) % folderModel.count;
             selectWallpaperIndex(currentIndex);
@@ -464,6 +506,7 @@ Item {
         // Inner content stays at full screen size even when parent is clipped (for wipe)
         Item {
             id: contentA
+            x: -layerA.x
             width: bgRoot.width; height: bgRoot.height
 
             MediaPlayer {
@@ -488,7 +531,7 @@ Item {
                 fillMode: Image.PreserveAspectCrop
                 source: typeA === "gif" ? sourceA : ""
                 visible: typeA === "gif"
-                playing: visible
+                playing: visible && (!transitionInProgress || transitionToA)
             }
             Image {
                 id: staticImageA
@@ -497,8 +540,8 @@ Item {
                 source: typeA === "image" ? sourceA : ""
                 visible: typeA === "image"
                 asynchronous: true
-                sourceSize.width: bgRoot.width      // ← tambahkan
-                sourceSize.height: bgRoot.height    // ← tambahkan
+                sourceSize.width: bgRoot.width > 0 ? bgRoot.width : Screen.width
+                sourceSize.height: bgRoot.height > 0 ? bgRoot.height : Screen.height
             }
         }
     }
@@ -516,6 +559,7 @@ Item {
         // Inner content stays at full screen size even when parent is clipped (for wipe)
         Item {
             id: contentB
+            x: -layerB.x
             width: bgRoot.width; height: bgRoot.height
 
             MediaPlayer {
@@ -540,7 +584,7 @@ Item {
                 fillMode: Image.PreserveAspectCrop
                 source: typeB === "gif" ? sourceB : ""
                 visible: typeB === "gif"
-                playing: visible
+                playing: visible && (!transitionInProgress || !transitionToA)
             }
             Image {
                 id: staticImageB
@@ -549,8 +593,8 @@ Item {
                 source: typeB === "image" ? sourceB : ""
                 visible: typeB === "image"
                 asynchronous: true
-                sourceSize.width: bgRoot.width      // ← tambahkan
-                sourceSize.height: bgRoot.height
+                sourceSize.width: bgRoot.width > 0 ? bgRoot.width : Screen.width
+                sourceSize.height: bgRoot.height > 0 ? bgRoot.height : Screen.height
             }
         }
     }
@@ -622,23 +666,47 @@ Item {
         ScriptAction { script: finalizeTransition() }
     }
 
-    // --- WIPE (left-to-right) ---
+    // --- WIPE ---
     SequentialAnimation {
-        id: wipeInB
+        id: wipeNextB
         NumberAnimation { target: layerB; property: "width"; from: 0; to: bgRoot.width; duration: 700; easing.type: Easing.OutCubic }
         ScriptAction { script: finalizeTransition() }
     }
 
     SequentialAnimation {
-        id: wipeInA
+        id: wipeNextA
         NumberAnimation { target: layerA; property: "width"; from: 0; to: bgRoot.width; duration: 700; easing.type: Easing.OutCubic }
         ScriptAction { script: finalizeTransition() }
     }
 
-    // --- CIRCLE REVEAL (center outward) ---
     SequentialAnimation {
-        id: circleReveal
+        id: wipePrevB
+        ParallelAnimation {
+            NumberAnimation { target: layerB; property: "width"; from: 0; to: bgRoot.width; duration: 700; easing.type: Easing.OutCubic }
+            NumberAnimation { target: layerB; property: "x"; from: bgRoot.width; to: 0; duration: 700; easing.type: Easing.OutCubic }
+        }
+        ScriptAction { script: finalizeTransition() }
+    }
+
+    SequentialAnimation {
+        id: wipePrevA
+        ParallelAnimation {
+            NumberAnimation { target: layerA; property: "width"; from: 0; to: bgRoot.width; duration: 700; easing.type: Easing.OutCubic }
+            NumberAnimation { target: layerA; property: "x"; from: bgRoot.width; to: 0; duration: 700; easing.type: Easing.OutCubic }
+        }
+        ScriptAction { script: finalizeTransition() }
+    }
+
+    // --- CIRCLE REVEAL ---
+    SequentialAnimation {
+        id: circleRevealNext
         NumberAnimation { target: revealCircle; property: "scale"; from: 0; to: 1; duration: 700; easing.type: Easing.OutCubic }
+        ScriptAction { script: finalizeTransition() }
+    }
+
+    SequentialAnimation {
+        id: circleRevealPrev
+        NumberAnimation { target: revealCircle; property: "scale"; from: 1; to: 0; duration: 700; easing.type: Easing.OutCubic }
         ScriptAction { script: finalizeTransition() }
     }
 
