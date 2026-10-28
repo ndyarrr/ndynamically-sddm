@@ -106,6 +106,14 @@ Item {
         setSetting("activeTransition", activeTransition);
     }
 
+    function setTransition(newTrans) {
+        var list = ["fade", "wipe", "circle", "none"];
+        if (list.indexOf(newTrans) !== -1) {
+            activeTransition = newTrans;
+            setSetting("activeTransition", activeTransition);
+        }
+    }
+
     FolderListModel {
         id: folderModel
         // The placeholder @WALLPAPER_DIR@ will be replaced by the installer with the actual path chosen by the user
