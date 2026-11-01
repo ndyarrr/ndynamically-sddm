@@ -97,6 +97,10 @@ Item {
 
     Component.onCompleted: {
         // activeMode & activeTransition sudah di-set lewat property initializer di atas
+        if (folderModel.status === FolderListModel.Ready && !initialWallpaperChosen) {
+            initialWallpaperChosen = true;
+            loadInitialWallpaper();
+        }
     }
 
     function cycleTransition() {

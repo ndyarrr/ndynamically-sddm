@@ -159,32 +159,70 @@ Rectangle {
     readonly property color btnCtaText: contrastText(primaryAccent)
 
     property string currentAccentFile: ""
+    property bool accentColorApplied: false
 
-    function updateAccentColor(filePath) {
+    function updateAccentColor(filePath, force) {
         if (!filePath) return;
-        var filename = filePath.substring(filePath.lastIndexOf('/') + 1);
-        if (filename === currentAccentFile) {
+        var cleanPath = filePath.toString();
+        if (cleanPath.indexOf("file://") === 0) {
+            cleanPath = cleanPath.substring(7);
+        }
+        var rawName = cleanPath.substring(cleanPath.lastIndexOf('/') + 1);
+        var filename = rawName;
+        try {
+            filename = decodeURIComponent(rawName);
+        } catch(e) {
+            filename = rawName;
+        }
+        if (!filename) return;
+
+        // Dedup guard: only skip if colors have already been successfully applied and it's the exact same file
+        if (!force && filename === currentAccentFile && root.accentColorApplied) {
             return;
         }
         currentAccentFile = filename;
-        if (Colors && Colors.colorMap && Colors.colorMap[filename]) {
-            var palette = Colors.colorMap[filename];
-            if (palette && palette.length >= 6) {
-                var best = root.getBestAccents(palette);
-                root.accent1 = best[0];
-                root.accent2 = best[1];
-                root.accent3 = palette[2];
-                root.accent4 = palette[3];
-                root.accent5 = palette[4];
-                root.accent6 = palette[5];
-                console.log("Accent colors updated from cache: " + filename + " -> primary=" + best[0] + ", secondary=" + best[1]);
-                return;
-            }
+
+        // 1. Look up cached palette in colors.js
+        var palette = null;
+        if (typeof Colors !== "undefined" && Colors && Colors.colorMap) {
+            palette = Colors.colorMap[filename] || Colors.colorMap[rawName];
         }
+
+        if (palette && palette.length >= 6) {
+            var best = root.getBestAccents(palette);
+            root.accent1 = best[0];
+            root.accent2 = best[1];
+            root.accent3 = palette[2];
+            root.accent4 = palette[3];
+            root.accent5 = palette[4];
+            root.accent6 = palette[5];
+            root.accentColorApplied = true;
+            console.log("Accent colors updated from cache: " + filename + " -> primary=" + best[0] + ", secondary=" + best[1]);
+            return;
+        }
+
+        // 2. Fallback for default bundled video bg.mp4
+        if (filename === "bg.mp4") {
+            var bgPalette = ["#f72d17", "#820901", "#500500", "#3b0300", "#1b0000", "#f72d17"];
+            var bestBg = root.getBestAccents(bgPalette);
+            root.accent1 = bestBg[0];
+            root.accent2 = bestBg[1];
+            root.accent3 = bgPalette[2];
+            root.accent4 = bgPalette[3];
+            root.accent5 = bgPalette[4];
+            root.accent6 = bgPalette[5];
+            root.accentColorApplied = true;
+            console.log("Accent colors applied from default bg.mp4 palette -> primary=" + bestBg[0] + ", secondary=" + bestBg[1]);
+            return;
+        }
+
+        // 3. Realtime image color extraction via Canvas for images & gifs
         var ext = filename.split('.').pop().toLowerCase();
         if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "webp" || ext === "gif") {
-            realtimeExtractor.imageSource = filePath;
+            var fullUrl = cleanPath.indexOf("://") === -1 ? ("file://" + cleanPath) : cleanPath;
+            realtimeExtractor.extractFromUrl(fullUrl);
         } else {
+            // Catppuccin Mocha fallbacks
             root.accent1 = root.mauve;
             root.accent2 = root.blue;
             root.accent3 = root.peach;
@@ -198,11 +236,25 @@ Rectangle {
         id: realtimeExtractor
         width: 3
         height: 2
-        visible: false
+        // visible must be true so Qt Quick scene graph does not skip paint passes
+        visible: true
+        opacity: 0
+        x: -200
+        y: -200
         property string imageSource: ""
-        onImageSourceChanged: if (imageSource !== "") loadImage(imageSource)
+
+        function extractFromUrl(url) {
+            imageSource = url;
+            if (isImageLoaded(url)) {
+                requestPaint();
+            } else {
+                loadImage(url);
+            }
+        }
+
         onImageLoaded: requestPaint()
         onPaint: {
+            if (!imageSource || !isImageLoaded(imageSource)) return;
             var ctx = getContext("2d");
             ctx.clearRect(0, 0, 3, 2);
             try {
@@ -224,7 +276,10 @@ Rectangle {
                 root.accent4 = pal[3];
                 root.accent5 = pal[4];
                 root.accent6 = pal[5];
+                root.accentColorApplied = true;
+                console.log("Accent colors extracted in realtime: " + imageSource + " -> primary=" + best[0] + ", secondary=" + best[1]);
             } catch (e) {
+                console.log("Canvas extraction error: " + e);
                 root.accent1 = root.mauve;
                 root.accent2 = root.blue;
                 root.accent3 = root.peach;
@@ -235,19 +290,33 @@ Rectangle {
         }
     }
 
-    property string activeWallpaperPath: bgLoader.item ? bgLoader.item.selectedFile : ""
+    property string activeWallpaperPath: (bgLoader.item && bgLoader.item.selectedFile) ? bgLoader.item.selectedFile : ""
     onActiveWallpaperPathChanged: {
-        root.updateAccentColor(activeWallpaperPath);
+        if (activeWallpaperPath !== "") {
+            root.updateAccentColor(activeWallpaperPath, true);
+        }
     }
 
+    // Robust multi-stage startup timer to catch wallpaper loading on boot / logout
     Timer {
-        id: initialColorTimer
-        interval: 200
+        id: colorSyncRetryTimer
+        interval: 100
+        repeat: true
         running: true
-        repeat: false
+        property int attempts: 0
         onTriggered: {
-            if (bgLoader.item) {
-                root.updateAccentColor(bgLoader.item.selectedFile);
+            attempts++;
+            if (bgLoader.item && bgLoader.item.selectedFile) {
+                var cur = bgLoader.item.selectedFile;
+                if (!root.accentColorApplied) {
+                    root.updateAccentColor(cur, true);
+                } else {
+                    stop();
+                    return;
+                }
+            }
+            if (attempts >= 30) { // 3 seconds max retry period
+                stop();
             }
         }
     }
@@ -513,12 +582,14 @@ Rectangle {
         }
         onLoaded: {
             if (item) {
-                root.updateAccentColor(item.selectedFile);
+                root.updateAccentColor(item.selectedFile, true);
                 item.backgroundReady.connect(function() {
+                    root.updateAccentColor(item.selectedFile, true);
                     rootFadeIn.start();
                     introSequence.start();
                 });
                 if (item.backgroundReadyFlag) {
+                    root.updateAccentColor(item.selectedFile, true);
                     rootFadeIn.start();
                     introSequence.start();
                 }
@@ -529,8 +600,8 @@ Rectangle {
     Connections {
         target: bgLoader.item
         function onSelectedFileChanged() {
-            if (bgLoader.item) {
-                root.updateAccentColor(bgLoader.item.selectedFile);
+            if (bgLoader.item && bgLoader.item.selectedFile) {
+                root.updateAccentColor(bgLoader.item.selectedFile, true);
             }
         }
     }
